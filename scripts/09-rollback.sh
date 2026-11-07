@@ -10,7 +10,7 @@ assert_lab_context
 step "09 rollback v2 -> v1 with git revert"
 v2_merge="$(awk '$1 == "v2" { print $2 }' "${OUT}/merge-commits.txt" | tail -1)"
 v1_uri="$(awk '$1 == "v1" { print $2 }' "${OUT}/registered-uris.txt" | tail -1)"
-[ -n "${v2_merge}" ] && [ -n "${v1_uri}" ] || { fail "run 06-promote.sh v1 and v2 first"; finish; }
+if [ -z "${v2_merge}" ] || [ -z "${v1_uri}" ]; then fail "run 06-promote.sh v1 and v2 first"; finish; fi
 
 gitea_up
 work="$(mktemp -d)"

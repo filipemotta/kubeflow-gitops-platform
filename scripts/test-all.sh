@@ -23,7 +23,7 @@ STEPS=(
   "11-static"
 )
 
-# shellcheck disable=SC2329  # invoked by the EXIT trap
+# shellcheck disable=SC2317,SC2329  # invoked by the EXIT trap
 teardown() { bash scripts/99-teardown.sh > "${OUT}/step-99-teardown.log" 2>&1; tail -1 "${OUT}/step-99-teardown.log"; }
 trap teardown EXIT
 
