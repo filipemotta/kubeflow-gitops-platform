@@ -1,0 +1,37 @@
+# kind cluster for the lab: ONE node (control plane that also runs every
+# workload), so the whole Kubeflow install fits a Docker VM of 5 CPUs and
+# ~7.7 GiB. The upstream CI (tests/install_KinD_create_KinD_cluster_install_kustomize.sh
+# in kubeflow/manifests 26.10.0) uses one control plane and two workers.
+#
+# - Node image v1.35.8, pinned by digest: the Kubernetes 1.35 entry of the
+#   kind v0.33.0 release notes and of the 26.10.0 CI matrix (1.35 and 1.37).
+# - kubeadmConfigPatches: the same API server flags as the upstream CI, plus
+#   GOMEMLIMIT for the API server (below). The
+#   service-account issuer https://kubernetes.default.svc is what the
+#   oauth2-proxy overlay "m2m-dex-and-kind" trusts, so ServiceAccount tokens
+#   (kubectl create token) authenticate at the Istio ingress gateway.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: kfp-gitops
+kubeadmConfigPatches:
+- |
+  apiVersion: kubeadm.k8s.io/v1beta4
+  kind: ClusterConfiguration
+  metadata:
+    name: config
+  apiServer:
+    extraArgs:
+    - name: service-account-issuer
+      value: https://kubernetes.default.svc
+    - name: service-account-signing-key-file
+      value: /etc/kubernetes/pki/sa.key
+    # Lab-only: a soft memory limit for the API server's Go runtime. With
+    # Kubeflow, Istio, Knative, KServe and Argo CD installed, its RSS reached
+    # 2.5 GB on a 7.7 GiB Docker VM and pushed the node into swap; the limit
+    # makes the garbage collector work harder before that happens.
+    extraEnvs:
+    - name: GOMEMLIMIT
+      value: 1536MiB
+nodes:
+- role: control-plane
+  image: kindest/node:v1.35.8@sha256:07b2536e30b803ed61d1677a79df6115f798ce64c80f9e22f6ed45afd09323c0

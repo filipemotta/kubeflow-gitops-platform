@@ -1,0 +1,76 @@
+# Stage 20: Istio 1.31.3 with the "oauth2-proxy" overlay (sidecar mode, CNI,
+# ext_authz provider for oauth2-proxy), as in example/kustomization.yaml, plus
+# the kubeflow namespaces. Changes for a 5 CPU / ~7.7 GiB machine:
+# - istiod requests 500m/2Gi -> 50m/256Mi; gateway requests 100m/128Mi -> 20m/64Mi
+# - istio-cni-node requests 100m/100Mi -> 10m/50Mi
+# - no HorizontalPodAutoscaler (one replica of everything)
+# Sidecar requests are already 10m/40Mi in the upstream injector values.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../../.cache/manifests/common/kubeflow-namespace/base
+- ../../.cache/manifests/common/istio/istio-crds/base
+- ../../.cache/manifests/common/istio/istio-namespace/base
+- ../../.cache/manifests/common/istio/istio-install/overlays/oauth2-proxy
+# Sidecar-free alternative (not used by the lab):
+# - ../../.cache/manifests/common/istio/istio-install/overlays/ambient-oauth2-proxy
+patches:
+- patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: istiod
+      namespace: istio-system
+    spec:
+      template:
+        spec:
+          containers:
+          - name: discovery
+            resources:
+              requests:
+                cpu: 50m
+                memory: 256Mi
+- patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: istio-ingressgateway
+      namespace: istio-system
+    spec:
+      template:
+        spec:
+          containers:
+          - name: istio-proxy
+            resources:
+              requests:
+                cpu: 20m
+                memory: 64Mi
+- patch: |-
+    apiVersion: apps/v1
+    kind: DaemonSet
+    metadata:
+      name: istio-cni-node
+      namespace: kube-system
+    spec:
+      template:
+        spec:
+          containers:
+          - name: install-cni
+            resources:
+              requests:
+                cpu: 10m
+                memory: 50Mi
+- patch: |-
+    apiVersion: autoscaling/v2
+    kind: HorizontalPodAutoscaler
+    metadata:
+      name: istiod
+      namespace: istio-system
+    $patch: delete
+- patch: |-
+    apiVersion: autoscaling/v2
+    kind: HorizontalPodAutoscaler
+    metadata:
+      name: istio-ingressgateway
+      namespace: istio-system
+    $patch: delete

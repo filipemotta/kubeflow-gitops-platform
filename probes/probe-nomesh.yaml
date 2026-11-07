@@ -1,0 +1,31 @@
+# The same probe, but without the Istio sidecar: a pod in the team's namespace
+# with no workload identity, which is exactly how KFP runs pipeline steps by
+# default (sidecar.istio.io/inject: "false"). Being in the right namespace is
+# not enough to call the team's model or registry; proving it with mTLS is.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: probe-nomesh
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: probe-nomesh
+  template:
+    metadata:
+      labels:
+        app: probe-nomesh
+      annotations:
+        sidecar.istio.io/inject: "false"
+    spec:
+      serviceAccountName: default-editor
+      containers:
+      - name: curl
+        image: curlimages/curl:8.17.0
+        command: ["sleep", "infinity"]
+        resources:
+          requests:
+            cpu: 5m
+            memory: 16Mi
+          limits:
+            memory: 64Mi

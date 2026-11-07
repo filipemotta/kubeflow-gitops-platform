@@ -1,0 +1,121 @@
+# A team's InferenceServices may only serve a model that one of the team's own
+# pipeline runs produced. The rule is an allowlist: storageUri must be an
+# artifact path that Kubeflow Pipelines writes for a run in the same namespace,
+#
+#   s3://mlpipeline/private-artifacts/<namespace>/v2/artifacts/<pipeline>/<run-id>/<step>/<task-id>/model
+#
+# with <run-id> and <task-id> as UUIDs. A "latest/" folder, a "current/" folder,
+# another team's run, another bucket or an image tag all fail the same check;
+# a denylist of "bad" names would let every name nobody thought of through.
+# The path is unique per run, so nothing in the normal flow writes to it again;
+# strict immutability of the object itself needs object lock or versioning on
+# the bucket, which this lab does not cover.
+#
+# Also refused: a transformer or explainer, custom containers or
+# initContainers in the predictor, and an image, command, args, env or runtime
+# on spec.predictor.model (the model spec is also a container spec). Each of
+# them can load or run something this rule does not see; how a model is served
+# is decided by the platform's ClusterServingRuntimes. The second policy below
+# keeps every other KServe resource (ServingRuntimes first of all) out of the
+# team namespaces. These field rules are defense in depth: the control that
+# closes the whole class is gitops-only-writer.yaml, which lets only Argo CD
+# write InferenceServices there, so any field reaches the cluster through a
+# reviewed pull request.
+# Deprecated framework fields (spec.predictor.sklearn, .xgboost...) are
+# rewritten into spec.predictor.model by KServe's defaulting webhook before
+# validating admission runs, so they are covered by the same checks.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: immutable-model-uri
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["serving.kserve.io"]
+      apiVersions: ["*"]
+      operations: ["CREATE", "UPDATE"]
+      resources: ["inferenceservices"]
+  variables:
+  - name: uri
+    expression: >-
+      has(object.spec.predictor.model) && has(object.spec.predictor.model.storageUri)
+      ? object.spec.predictor.model.storageUri : ''
+  - name: uuid
+    expression: "'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'"
+  - name: allowed
+    expression: >-
+      '^s3://mlpipeline/private-artifacts/' + request.namespace +
+      '/v2/artifacts/[a-z0-9-]+/' + variables.uuid + '/[a-z0-9-]+/' + variables.uuid + '/model$'
+  validations:
+  - expression: variables.uri != ''
+    message: "spec.predictor.model.storageUri is required"
+  - expression: variables.uri.matches(variables.allowed)
+    messageExpression: >-
+      'storageUri ' + variables.uri + ' is not a pipeline-run artifact of ' + request.namespace +
+      '; expected s3://mlpipeline/private-artifacts/' + request.namespace +
+      '/v2/artifacts/<pipeline>/<run-id>/<step>/<task-id>/model, as registered in Kubeflow Hub'
+  - expression: "!has(object.spec.transformer) && !has(object.spec.explainer)"
+    message: "transformers and explainers are not allowed: they load models from outside this check"
+  - expression: "!has(object.spec.predictor.containers) || size(object.spec.predictor.containers) == 0"
+    message: "custom predictor containers are not allowed: serve through spec.predictor.model"
+  - expression: "!has(object.spec.predictor.initContainers) || size(object.spec.predictor.initContainers) == 0"
+    message: "predictor initContainers are not allowed: they can fetch a model from anywhere"
+  - expression: >-
+      !has(object.spec.predictor.model) ||
+      (!has(object.spec.predictor.model.image) && !has(object.spec.predictor.model.command) &&
+       !has(object.spec.predictor.model.args) && !has(object.spec.predictor.model.env) &&
+       !has(object.spec.predictor.model.runtime))
+    message: "spec.predictor.model must not set image, command, args, env or runtime: the platform's ClusterServingRuntimes decide how a model is served"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: immutable-model-uri
+spec:
+  policyName: immutable-model-uri
+  validationActions: ["Deny"]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        app.kubernetes.io/part-of: kubeflow-profile
+---
+# Teams serve through InferenceServices only. Every other namespaced KServe
+# resource (ServingRuntime, InferenceGraph, TrainedModel, LLMInferenceService
+# and its configs, kernel and local model caches) is the platform's: each of
+# them can decide what image runs or what model is loaded, around every rule
+# above. A namespaced ServingRuntime with autoSelect would even be picked up
+# by KServe for the team's own InferenceServices.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: platform-managed-serving
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["serving.kserve.io"]
+      apiVersions: ["*"]
+      operations: ["CREATE", "UPDATE"]
+      resources: ["*"]
+    excludeResourceRules:
+    - apiGroups: ["serving.kserve.io"]
+      apiVersions: ["*"]
+      operations: ["CREATE", "UPDATE"]
+      resources: ["inferenceservices"]
+  validations:
+  - expression: "false"
+    messageExpression: >-
+      request.resource.resource + ' are managed by the platform; teams serve models through InferenceServices only'
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: platform-managed-serving
+spec:
+  policyName: platform-managed-serving
+  validationActions: ["Deny"]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        app.kubernetes.io/part-of: kubeflow-profile

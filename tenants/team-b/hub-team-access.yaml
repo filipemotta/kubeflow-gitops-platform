@@ -1,0 +1,15 @@
+# Lets team-b's own workloads call team-b's Model Registry (see team-a's copy).
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: model-registry-team-access
+spec:
+  action: ALLOW
+  selector:
+    matchLabels:
+      component: model-registry-server
+  rules:
+  - from:
+    - source:
+        namespaces:
+        - team-b

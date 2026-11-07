@@ -1,0 +1,2 @@
+# Follow "source scripts/lib.sh" in every script (paths relative to the repo root).
+external-sources=true

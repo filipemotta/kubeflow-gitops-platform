@@ -1,0 +1,80 @@
+# Gitea 28.3.0 (rootless image), one replica, SQLite, ephemeral storage: the
+# lab's GitOps repository server. Configuration comes from GITEA__section__KEY
+# environment variables. Not a production install: no persistence, no TLS.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitops
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitea
+  namespace: gitops
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gitea
+  template:
+    metadata:
+      labels:
+        app: gitea
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+      - name: gitea
+        image: docker.gitea.com/gitea:28.3.0-rootless
+        ports:
+        - name: http
+          containerPort: 3000
+        env:
+        - name: GITEA__database__DB_TYPE
+          value: sqlite3
+        - name: GITEA__security__INSTALL_LOCK
+          value: "true"
+        - name: GITEA__server__ROOT_URL
+          value: http://gitea-http.gitops.svc.cluster.local:3000/
+        - name: GITEA__server__DISABLE_SSH
+          value: "true"
+        - name: GITEA__service__DISABLE_REGISTRATION
+          value: "true"
+        - name: GITEA__repository__DEFAULT_BRANCH
+          value: main
+        readinessProbe:
+          httpGet:
+            path: /api/healthz
+            port: http
+          periodSeconds: 5
+        resources:
+          requests:
+            cpu: 20m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/gitea
+        - name: config
+          mountPath: /etc/gitea
+      volumes:
+      - name: data
+        emptyDir: {}
+      - name: config
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitea-http
+  namespace: gitops
+spec:
+  selector:
+    app: gitea
+  ports:
+  - name: http
+    port: 3000
+    targetPort: http

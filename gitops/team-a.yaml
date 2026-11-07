@@ -1,0 +1,42 @@
+# What Argo CD may do on team-a's behalf. The AppProject is the boundary:
+# only the GitOps repository as a source, only the team-a namespace as a
+# destination, only InferenceServices as resources, nothing cluster-scoped.
+# An Application in this project that targets another namespace is refused.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: team-a
+  namespace: argocd
+spec:
+  description: team-a models
+  sourceRepos:
+  - http://gitea-http.gitops.svc.cluster.local:3000/platform/gitops.git
+  destinations:
+  - server: https://kubernetes.default.svc
+    namespace: team-a
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+  - group: serving.kserve.io
+    kind: InferenceService
+---
+# Syncs apps/team-a of the GitOps repository into team-a. Automated sync with
+# prune and self-heal: what is merged on main is what runs, and a hand edit
+# in the cluster is reverted.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: team-a-models
+  namespace: argocd
+spec:
+  project: team-a
+  source:
+    repoURL: http://gitea-http.gitops.svc.cluster.local:3000/platform/gitops.git
+    targetRevision: main
+    path: apps/team-a
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: team-a
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

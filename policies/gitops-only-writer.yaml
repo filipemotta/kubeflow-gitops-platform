@@ -1,0 +1,43 @@
+# Only the GitOps controller writes InferenceServices in a team namespace.
+# The pipeline proposes a model by pull request, a reviewer merges, Argo CD
+# applies. Nobody else, alice included, creates or edits one by hand, so every
+# field of every InferenceService, not only the few the other policies check,
+# reaches the cluster through a reviewed change in Git.
+#
+# Also admitted: KServe's own controller (it updates the objects it reconciles,
+# finalizers included) and the cluster-admin groups, as a break-glass path.
+# kind's admin kubeconfig authenticates in kubeadm:cluster-admins (kubeadm
+# 1.29+); system:masters is the classic one.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: gitops-only-writer
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["serving.kserve.io"]
+      apiVersions: ["*"]
+      operations: ["CREATE", "UPDATE"]
+      resources: ["inferenceservices"]
+  validations:
+  - expression: >-
+      request.userInfo.username in [
+        'system:serviceaccount:argocd:argocd-application-controller',
+        'system:serviceaccount:kserve:kserve-controller-manager'] ||
+      request.userInfo.groups.exists(g, g in ['system:masters', 'kubeadm:cluster-admins'])
+    messageExpression: >-
+      request.userInfo.username + ' cannot write InferenceServices in ' + request.namespace +
+      '; propose the change by pull request to the GitOps repository, Argo CD applies it'
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: gitops-only-writer
+spec:
+  policyName: gitops-only-writer
+  validationActions: ["Deny"]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        app.kubernetes.io/part-of: kubeflow-profile

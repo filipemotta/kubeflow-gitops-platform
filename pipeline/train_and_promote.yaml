@@ -1,0 +1,492 @@
+# PIPELINE DEFINITION
+# Name: train-and-promote
+# Inputs:
+#    accuracy_threshold: float [Default: 0.9]
+#    git_api: str [Default: 'http://gitea-http.gitops.svc.cluster.local:3000']
+#    gitops_repo: str [Default: 'platform/gitops']
+#    label_noise: float [Default: 0.0]
+#    model_name: str [Default: 'iris-classifier']
+#    namespace: str [Default: 'team-a']
+#    registry_url: str [Default: 'http://model-registry-service:8080']
+#    seed: int [Default: 7.0]
+#    version: str [Default: 'v1']
+components:
+  comp-evaluate:
+    executorLabel: exec-evaluate
+    inputDefinitions:
+      artifacts:
+        model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        metrics:
+          artifactType:
+            schemaTitle: system.Metrics
+            schemaVersion: 0.0.1
+      parameters:
+        Output:
+          parameterType: NUMBER_DOUBLE
+  comp-gate:
+    executorLabel: exec-gate
+    inputDefinitions:
+      parameters:
+        accuracy:
+          parameterType: NUMBER_DOUBLE
+        threshold:
+          parameterType: NUMBER_DOUBLE
+  comp-open-pull-request:
+    executorLabel: exec-open-pull-request
+    inputDefinitions:
+      parameters:
+        accuracy:
+          parameterType: NUMBER_DOUBLE
+        git_api:
+          parameterType: STRING
+        model_name:
+          parameterType: STRING
+        namespace:
+          parameterType: STRING
+        repo:
+          parameterType: STRING
+        storage_uri:
+          parameterType: STRING
+        version:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-register:
+    executorLabel: exec-register
+    inputDefinitions:
+      artifacts:
+        model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+      parameters:
+        accuracy:
+          parameterType: NUMBER_DOUBLE
+        model_name:
+          parameterType: STRING
+        namespace:
+          parameterType: STRING
+        registry_url:
+          parameterType: STRING
+        run_id:
+          parameterType: STRING
+        version:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-train:
+    executorLabel: exec-train
+    inputDefinitions:
+      parameters:
+        label_noise:
+          parameterType: NUMBER_DOUBLE
+        seed:
+          parameterType: NUMBER_INTEGER
+    outputDefinitions:
+      artifacts:
+        model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-evaluate:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - evaluate
+        command:
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef evaluate(model: dsl.Input[dsl.Model], metrics: dsl.Output[dsl.Metrics])\
+          \ -> float:\n    \"\"\"Accuracy on a held-out split the training step never\
+          \ saw.\"\"\"\n    import os\n\n    import joblib\n    from sklearn.datasets\
+          \ import load_iris\n    from sklearn.model_selection import train_test_split\n\
+          \n    x, y = load_iris(return_X_y=True)\n    _, x_test, _, y_test = train_test_split(x,\
+          \ y, test_size=0.3, random_state=42, stratify=y)\n    # Loads the artifact\
+          \ the train step of this same run just wrote. joblib is\n    # pickle: only\
+          \ ever load models your own pipeline produced.\n    clf = joblib.load(os.path.join(model.path,\
+          \ \"model.joblib\"))\n    accuracy = float(clf.score(x_test, y_test))\n\
+          \    metrics.log_metric(\"accuracy\", accuracy)\n    print(f\"accuracy={accuracy:.4f}\"\
+          )\n    return accuracy\n\n"
+        image: kfp-gitops/sklearn-trainer:1.5.2
+    exec-gate:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - gate
+        command:
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef gate(accuracy: float, threshold: float):\n    \"\"\"Fails the\
+          \ run below the threshold. A gate that only logs is not a gate.\"\"\"\n\
+          \    if accuracy < threshold:\n        raise SystemExit(f\"GATE REJECTED:\
+          \ accuracy {accuracy:.4f} < threshold {threshold:.4f}\")\n    print(f\"\
+          GATE PASSED: accuracy {accuracy:.4f} >= threshold {threshold:.4f}\")\n\n"
+        image: kfp-gitops/sklearn-trainer:1.5.2
+    exec-open-pull-request:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - open_pull_request
+        command:
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef open_pull_request(storage_uri: str, model_name: str, version:\
+          \ str, namespace: str,\n                      git_api: str, repo: str, accuracy:\
+          \ float) -> str:\n    \"\"\"Opens a pull request that points the team's\
+          \ InferenceService at the new\n    version. Merging it is a human (or policy)\
+          \ decision; Argo CD does the rest.\"\"\"\n    import base64\n    import\
+          \ json\n    import os\n    import urllib.error\n    import urllib.request\n\
+          \n    token = os.environ[\"GIT_TOKEN\"]\n    api = f\"{git_api}/api/v1/repos/{repo}\"\
+          \n    path = f\"apps/{namespace}/{model_name}.yaml\"\n    branch = f\"promote/{model_name}-{version}\"\
+          \n\n    def call(method, url, body=None):\n        req = urllib.request.Request(url,\
+          \ method=method,\n                                     data=json.dumps(body).encode()\
+          \ if body is not None else None,\n                                     headers={\"\
+          Content-Type\": \"application/json\",\n                                \
+          \              \"Authorization\": f\"token {token}\"})\n        try:\n \
+          \           with urllib.request.urlopen(req, timeout=30) as resp:\n    \
+          \            return resp.status, json.loads(resp.read() or b\"{}\")\n  \
+          \      except urllib.error.HTTPError as err:\n            return err.code,\
+          \ {\"error\": err.read().decode(errors=\"replace\")}\n\n    manifest = f\"\
+          \"\"# Managed by the training pipeline through pull requests. Do not edit\
+          \ by hand:\n# the version below is the one registered in Kubeflow Hub.\n\
+          apiVersion: serving.kserve.io/v1beta1\nkind: InferenceService\nmetadata:\n\
+          \  name: {model_name}\n  namespace: {namespace}\n  labels:\n    lab.kubeflow-gitops/model-version:\
+          \ \"{version}\"\n  annotations:\n    # A plain Deployment + Service (no\
+          \ Knative): callers reach the predictor\n    # over mTLS and the team's\
+          \ Profile policy decides who may call it.\n    serving.kserve.io/deploymentMode:\
+          \ Standard\nspec:\n  predictor:\n    serviceAccountName: kserve-models\n\
+          \    minReplicas: 1\n    model:\n      modelFormat:\n        name: sklearn\n\
+          \      storageUri: {storage_uri}\n      resources:\n        requests:\n\
+          \          cpu: 20m\n          memory: 128Mi\n        limits:\n        \
+          \  cpu: \"1\"\n          memory: 512Mi\n\"\"\"\n    status, created = call(\"\
+          POST\", f\"{api}/branches\", {\"new_branch_name\": branch, \"old_branch_name\"\
+          : \"main\"})\n    if status not in (200, 201):\n        raise SystemExit(f\"\
+          cannot create branch {branch}: {status} {created}\")\n\n    status, current\
+          \ = call(\"GET\", f\"{api}/contents/{path}?ref={branch}\")\n    body = {\"\
+          content\": base64.b64encode(manifest.encode()).decode(), \"branch\": branch,\n\
+          \            \"message\": f\"Promote {model_name} {version} (accuracy {accuracy:.4f})\"\
+          }\n    if status == 200:\n        body[\"sha\"] = current[\"sha\"]\n   \
+          \     status, res = call(\"PUT\", f\"{api}/contents/{path}\", body)\n  \
+          \  else:\n        status, res = call(\"POST\", f\"{api}/contents/{path}\"\
+          , body)\n    if status not in (200, 201):\n        raise SystemExit(f\"\
+          cannot write {path} on {branch}: {status} {res}\")\n\n    status, pr = call(\"\
+          POST\", f\"{api}/pulls\", {\n        \"head\": branch, \"base\": \"main\"\
+          ,\n        \"title\": f\"Promote {model_name} {version}\",\n        \"body\"\
+          : f\"Registered in Kubeflow Hub as {model_name} {version}.\\n\\n\"\n   \
+          \             f\"accuracy: {accuracy:.4f}\\nstorageUri: {storage_uri}\\\
+          n\",\n    })\n    if status != 201:\n        raise SystemExit(f\"cannot\
+          \ open pull request: {status} {pr}\")\n    print(f\"opened pull request\
+          \ #{pr['number']}: {pr['html_url']}\")\n    return str(pr[\"number\"])\n\
+          \n"
+        image: kfp-gitops/sklearn-trainer:1.5.2
+    exec-register:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - register
+        command:
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef register(model: dsl.Input[dsl.Model], accuracy: float, model_name:\
+          \ str,\n             version: str, registry_url: str, namespace: str, run_id:\
+          \ str) -> str:\n    \"\"\"Registers the model version in the team's Kubeflow\
+          \ Hub and returns the\n    storage URI that serving must use. The URI is\
+          \ the run's own artifact path,\n    unique per run: there is no \"latest\"\
+          \ to overwrite.\"\"\"\n    import json\n    import urllib.error\n    import\
+          \ urllib.request\n\n    api = f\"{registry_url}/api/model_registry/v1alpha3\"\
+          \n\n    def call(method, path, body=None):\n        req = urllib.request.Request(api\
+          \ + path, method=method,\n                                     data=json.dumps(body).encode()\
+          \ if body is not None else None,\n                                     headers={\"\
+          Content-Type\": \"application/json\"})\n        try:\n            with urllib.request.urlopen(req,\
+          \ timeout=30) as resp:\n                return resp.status, json.loads(resp.read()\
+          \ or b\"{}\")\n        except urllib.error.HTTPError as err:\n         \
+          \   return err.code, {\"error\": err.read().decode(errors=\"replace\")}\n\
+          \n    # KFP writes artifacts with the minio:// scheme; KServe's storage\n\
+          \    # initializer reads the same object store through s3://.\n    uri =\
+          \ model.uri.replace(\"minio://\", \"s3://\", 1)\n\n    status, found = call(\"\
+          GET\", f\"/registered_model?name={model_name}\")\n    if status == 200:\n\
+          \        model_id = found[\"id\"]\n    else:\n        status, created =\
+          \ call(\"POST\", \"/registered_models\", {\"name\": model_name})\n     \
+          \   if status != 201:\n            raise SystemExit(f\"cannot create registered\
+          \ model: {status} {created}\")\n        model_id = created[\"id\"]\n\n \
+          \   status, mv = call(\"POST\", \"/model_versions\", {\n        \"name\"\
+          : version,\n        \"registeredModelId\": model_id,\n        \"customProperties\"\
+          : {\n            \"accuracy\": {\"metadataType\": \"MetadataDoubleValue\"\
+          , \"double_value\": accuracy},\n        },\n    })\n    if status != 201:\n\
+          \        # 409: the version name already exists. Versions are immutable:\
+          \ a new\n        # model needs a new version name, never an overwrite.\n\
+          \        raise SystemExit(f\"cannot create model version {version}: {status}\
+          \ {mv}\")\n\n    status, art = call(\"POST\", f\"/model_versions/{mv['id']}/artifacts\"\
+          , {\n        \"artifactType\": \"model-artifact\",\n        \"name\": f\"\
+          {model_name}-{version}\",\n        \"uri\": uri,\n        \"modelFormatName\"\
+          : \"sklearn\",\n        \"modelFormatVersion\": \"1\",\n        \"modelSourceKind\"\
+          : \"kfp\",\n        \"modelSourceClass\": \"pipelinerun\",\n        \"modelSourceGroup\"\
+          : namespace,\n        \"modelSourceId\": run_id,\n    })\n    if status\
+          \ not in (200, 201):\n        raise SystemExit(f\"cannot attach artifact:\
+          \ {status} {art}\")\n    print(f\"registered {model_name} {version} (model\
+          \ version id {mv['id']}) -> {uri}\")\n    return uri\n\n"
+        image: kfp-gitops/sklearn-trainer:1.5.2
+    exec-train:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train
+        command:
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train(label_noise: float, seed: int, model: dsl.Output[dsl.Model]):\n\
+          \    \"\"\"Trains a logistic regression on iris. label_noise > 0 shuffles\
+          \ that\n    fraction of the training labels: the lab's stand-in for bad\
+          \ data.\"\"\"\n    import os\n\n    import joblib\n    import numpy as np\n\
+          \    from sklearn.datasets import load_iris\n    from sklearn.linear_model\
+          \ import LogisticRegression\n    from sklearn.model_selection import train_test_split\n\
+          \n    x, y = load_iris(return_X_y=True)\n    x_train, _, y_train, _ = train_test_split(x,\
+          \ y, test_size=0.3, random_state=42, stratify=y)\n    rng = np.random.default_rng(seed)\n\
+          \    noisy = rng.random(len(y_train)) < label_noise\n    y_train = np.where(noisy,\
+          \ rng.integers(0, 3, len(y_train)), y_train)\n\n    clf = LogisticRegression(max_iter=500).fit(x_train,\
+          \ y_train)\n    # KServe's sklearn runtime loads <storageUri>/model.joblib.\n\
+          \    os.makedirs(model.path, exist_ok=True)\n    joblib.dump(clf, os.path.join(model.path,\
+          \ \"model.joblib\"))\n    model.metadata[\"framework\"] = \"sklearn\"\n\
+          \    model.metadata[\"label_noise\"] = label_noise\n\n"
+        image: kfp-gitops/sklearn-trainer:1.5.2
+pipelineInfo:
+  name: train-and-promote
+root:
+  dag:
+    tasks:
+      evaluate:
+        cachingOptions: {}
+        componentRef:
+          name: comp-evaluate
+        dependentTasks:
+        - train
+        inputs:
+          artifacts:
+            model:
+              taskOutputArtifact:
+                outputArtifactKey: model
+                producerTask: train
+        taskInfo:
+          name: evaluate
+      gate:
+        cachingOptions: {}
+        componentRef:
+          name: comp-gate
+        dependentTasks:
+        - evaluate
+        inputs:
+          parameters:
+            accuracy:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: evaluate
+            threshold:
+              componentInputParameter: accuracy_threshold
+        taskInfo:
+          name: gate
+      open-pull-request:
+        cachingOptions: {}
+        componentRef:
+          name: comp-open-pull-request
+        dependentTasks:
+        - evaluate
+        - register
+        inputs:
+          parameters:
+            accuracy:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: evaluate
+            git_api:
+              componentInputParameter: git_api
+            model_name:
+              componentInputParameter: model_name
+            namespace:
+              componentInputParameter: namespace
+            repo:
+              componentInputParameter: gitops_repo
+            storage_uri:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: register
+            version:
+              componentInputParameter: version
+        taskInfo:
+          name: open-pull-request
+      register:
+        cachingOptions: {}
+        componentRef:
+          name: comp-register
+        dependentTasks:
+        - evaluate
+        - gate
+        - train
+        inputs:
+          artifacts:
+            model:
+              taskOutputArtifact:
+                outputArtifactKey: model
+                producerTask: train
+          parameters:
+            accuracy:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: evaluate
+            model_name:
+              componentInputParameter: model_name
+            namespace:
+              componentInputParameter: namespace
+            registry_url:
+              componentInputParameter: registry_url
+            run_id:
+              runtimeValue:
+                constant: '{{$.pipeline_job_uuid}}'
+            version:
+              componentInputParameter: version
+        taskInfo:
+          name: register
+      train:
+        cachingOptions: {}
+        componentRef:
+          name: comp-train
+        inputs:
+          parameters:
+            label_noise:
+              componentInputParameter: label_noise
+            seed:
+              componentInputParameter: seed
+        taskInfo:
+          name: train
+  inputDefinitions:
+    parameters:
+      accuracy_threshold:
+        defaultValue: 0.9
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
+      git_api:
+        defaultValue: http://gitea-http.gitops.svc.cluster.local:3000
+        isOptional: true
+        parameterType: STRING
+      gitops_repo:
+        defaultValue: platform/gitops
+        isOptional: true
+        parameterType: STRING
+      label_noise:
+        defaultValue: 0.0
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
+      model_name:
+        defaultValue: iris-classifier
+        isOptional: true
+        parameterType: STRING
+      namespace:
+        defaultValue: team-a
+        isOptional: true
+        parameterType: STRING
+      registry_url:
+        defaultValue: http://model-registry-service:8080
+        isOptional: true
+        parameterType: STRING
+      seed:
+        defaultValue: 7.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      version:
+        defaultValue: v1
+        isOptional: true
+        parameterType: STRING
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.18.0
+---
+platforms:
+  kubernetes:
+    deploymentSpec:
+      executors:
+        exec-evaluate:
+          imagePullPolicy: IfNotPresent
+        exec-gate:
+          imagePullPolicy: IfNotPresent
+        exec-open-pull-request:
+          imagePullPolicy: IfNotPresent
+          secretAsEnv:
+          - keyToEnv:
+            - envVar: GIT_TOKEN
+              secretKey: token
+            optional: false
+            secretName: gitops-pr-token
+            secretNameParameter:
+              runtimeValue:
+                constant: gitops-pr-token
+        exec-register:
+          imagePullPolicy: IfNotPresent
+          podMetadata:
+            annotations:
+              sidecar.istio.io/inject: 'true'
+        exec-train:
+          imagePullPolicy: IfNotPresent

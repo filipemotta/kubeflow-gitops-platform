@@ -1,0 +1,36 @@
+# team-b's boundary in Argo CD (same shape as team-a.yaml).
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: team-b
+  namespace: argocd
+spec:
+  description: team-b models
+  sourceRepos:
+  - http://gitea-http.gitops.svc.cluster.local:3000/platform/gitops.git
+  destinations:
+  - server: https://kubernetes.default.svc
+    namespace: team-b
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+  - group: serving.kserve.io
+    kind: InferenceService
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: team-b-models
+  namespace: argocd
+spec:
+  project: team-b
+  source:
+    repoURL: http://gitea-http.gitops.svc.cluster.local:3000/platform/gitops.git
+    targetRevision: main
+    path: apps/team-b
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: team-b
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

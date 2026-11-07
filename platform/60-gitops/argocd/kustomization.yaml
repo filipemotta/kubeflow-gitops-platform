@@ -1,0 +1,56 @@
+# Argo CD v3.6.1, official non-HA install, trimmed. Kept: application
+# controller, repo server and Redis. Removed: Dex, notifications, the
+# ApplicationSet controller and the API server/UI (the lab manages
+# Applications and AppProjects as CRs with kubectl, so nothing calls it).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: argocd
+resources:
+- namespace.yaml
+- https://raw.githubusercontent.com/argoproj/argo-cd/v3.6.1/manifests/install.yaml
+patches:
+- patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: argocd-dex-server
+    $patch: delete
+- patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: argocd-notifications-controller
+    $patch: delete
+- patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: argocd-applicationset-controller
+    $patch: delete
+- patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: argocd-server
+    $patch: delete
+# - Poll the repository every 30s instead of 120s, so a merged pull request
+#   shows up in the cluster within the lab's timeouts (no webhook from Gitea).
+# - Watch only what Argo CD delivers here: InferenceServices. By default the
+#   application controller lists and watches every group/kind in the cluster;
+#   with Kubeflow, Istio, Knative and KServe installed that is hundreds of
+#   kinds, and on this 7.7 GiB machine it cost ~460 MiB in the controller plus
+#   the API server's share. Big platforms set this for the same reason.
+- patch: |-
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: argocd-cm
+    data:
+      timeout.reconciliation: 30s
+      resource.inclusions: |
+        - apiGroups:
+          - serving.kserve.io
+          kinds:
+          - InferenceService
+          clusters:
+          - "*"

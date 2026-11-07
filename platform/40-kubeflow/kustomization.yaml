@@ -1,0 +1,129 @@
+# Stage 40: the Kubeflow pieces the lab needs, from example/kustomization.yaml
+# of kubeflow/manifests 26.10.0: roles, Istio resources (kubeflow-gateway),
+# Central Dashboard with the Profile controller and KFAM, and Kubeflow
+# Pipelines 2.18.0 multi-user (definitions in MySQL, artifacts in SeaweedFS).
+# Requests reduced for a 5 CPU / ~7.7 GiB machine (limits kept):
+# - ml-pipeline 250m/500Mi -> 50m/128Mi; persistenceagent 120m/500Mi -> 10m/64Mi
+# - visualizationserver 30m/500Mi -> 10m/64Mi; workflow-controller 100m/500Mi -> 20m/96Mi
+# - metacontroller 100m/256Mi -> 10m/64Mi
+# - mysql 100m/800Mi -> 100m/256Mi, performance_schema off, 64M buffer pool
+# - Central Dashboard UI scaled to 0 (Profile controller and KFAM stay)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../../.cache/manifests/common/kubeflow-roles/base
+- ../../.cache/manifests/common/istio/kubeflow-istio-resources/base
+- ../../.cache/manifests/applications/dashboard/overlays/istio
+- ../../.cache/manifests/applications/pipeline/overlays
+# Not executed by the lab (see README, "What was left out"). On a bigger
+# machine, uncomment to get the rest of the distribution:
+# - ../../.cache/manifests/applications/katib/upstream/installs/katib-with-kubeflow   # deprecated in 26.10
+# - ../../.cache/manifests/applications/workspaces/overlays/istio                     # Workspaces (Notebooks v2)
+# - ../../.cache/manifests/applications/trainer/overlays                              # Trainer 2.4 + JobSet
+# - ../../.cache/manifests/applications/spark/spark-operator/overlays/kubeflow        # Spark Operator
+# - ../../.cache/manifests/applications/hub/overlays/model-catalog                    # Hub Model Catalog
+# - ../../.cache/manifests/applications/pipeline/upstream/env/cert-manager/platform-agnostic-multi-user-k8s-native  # KFP k8s-native API mode (instead of overlays above)
+patches:
+# Second cut of the order approved in ADR-0002: the Central Dashboard UI at
+# zero replicas. The Profile controller and KFAM (profiles-deployment), which
+# create and guard the team namespaces, keep running; the lab uses the APIs.
+- patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: dashboard
+      namespace: kubeflow
+    spec:
+      replicas: 0
+# KFP's MySQL 8.4: without performance_schema and with a 64M InnoDB buffer
+# pool its RSS drops from ~490 MiB; the lab's metadata fits many times over.
+# Request lowered from 800Mi to 256Mi so the single node can schedule it.
+- target:
+    kind: Deployment
+    name: mysql
+    namespace: kubeflow
+  patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/args/-
+      value: --performance-schema=OFF
+    - op: add
+      path: /spec/template/spec/containers/0/args/-
+      value: --innodb-buffer-pool-size=64M
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/memory
+      value: 256Mi
+- patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: ml-pipeline
+      namespace: kubeflow
+    spec:
+      template:
+        spec:
+          containers:
+          - name: ml-pipeline-api-server
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+- patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: ml-pipeline-persistenceagent
+      namespace: kubeflow
+    spec:
+      template:
+        spec:
+          containers:
+          - name: ml-pipeline-persistenceagent
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+- patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: ml-pipeline-visualizationserver
+      namespace: kubeflow
+    spec:
+      template:
+        spec:
+          containers:
+          - name: ml-pipeline-visualizationserver
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+- patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: workflow-controller
+      namespace: kubeflow
+    spec:
+      template:
+        spec:
+          containers:
+          - name: workflow-controller
+            resources:
+              requests:
+                cpu: 20m
+                memory: 96Mi
+- patch: |-
+    apiVersion: apps/v1
+    kind: StatefulSet
+    metadata:
+      name: metacontroller
+      namespace: kubeflow
+    spec:
+      template:
+        spec:
+          containers:
+          - name: metacontroller
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi

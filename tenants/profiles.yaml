@@ -1,0 +1,23 @@
+# The two teams of the lab. A Profile is the Kubeflow unit of tenancy: the
+# Profile controller turns each one into a namespace with Istio injection, a
+# RoleBinding that makes the owner a namespace admin, the default-editor and
+# default-viewer ServiceAccounts, and an Istio AuthorizationPolicy that only
+# lets the owner (header kubeflow-userid, set by oauth2-proxy at the ingress
+# gateway) and the namespace's own workloads in.
+apiVersion: kubeflow.org/v1beta1
+kind: Profile
+metadata:
+  name: team-a
+spec:
+  owner:
+    kind: User
+    name: alice@example.com
+---
+apiVersion: kubeflow.org/v1beta1
+kind: Profile
+metadata:
+  name: team-b
+spec:
+  owner:
+    kind: User
+    name: bob@example.com

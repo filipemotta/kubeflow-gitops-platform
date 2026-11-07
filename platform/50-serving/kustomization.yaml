@@ -1,0 +1,87 @@
+# Stage 50: serving. KServe 0.21.0 controllers, without the Models Web
+# Application (UI), in KServe's "Standard" deployment mode: each predictor is a
+# plain Deployment + Service, no Knative.
+#
+# The distribution installs Knative Serving and runs KServe in "Knative" mode
+# (scale to zero, revisions). The lab ran that first and cut it, the first cut
+# of the order approved in ADR-0002, for two measured reasons:
+# - memory: with Knative, pipelines and serving running at once, the 5 CPU /
+#   7.7 GiB Docker VM went into swap (load average ~88, API server at 2.5 GB,
+#   Argo CD and controllers losing leader election);
+# - isolation: Knative's activator forwards requests to the predictor without
+#   mTLS, so no Istio policy on the predictor can tell which team is calling.
+#   Upstream's own KServe test works around it with an allow-all policy on the
+#   predictor, which lets any authenticated identity, from any team, call it.
+# In Standard mode the caller's sidecar talks mTLS to the predictor's sidecar,
+# and the Profile's own policy (only team-a's namespace, or its owner through
+# the ingress gateway) is what decides.
+#
+# Requests reduced for a 5 CPU / ~7.7 GiB machine (limits kept):
+# - KServe managers 100m/200-300Mi -> 20m/64Mi
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../../.cache/manifests/applications/kserve/kserve
+# Not executed by the lab (uncomment on a bigger machine, together with the
+# "Knative" defaultDeploymentMode below):
+# - ../../.cache/manifests/common/knative/knative-serving/overlays/gateways
+# - ../../.cache/manifests/common/istio/cluster-local-gateway/overlays/m2m-auth
+# - ../../.cache/manifests/common/knative/knative-eventing/base   # optional in the distribution too
+# - ../../.cache/manifests/applications/kserve/kserve-ui          # KServe Models Web Application
+patches:
+- patch: |-
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: inferenceservice-config
+      namespace: kserve
+    data:
+      deploy: |-
+        {
+          "defaultDeploymentMode": "Standard"
+        }
+- patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: kserve-controller-manager
+      namespace: kserve
+    spec:
+      template:
+        spec:
+          containers:
+          - name: manager
+            resources:
+              requests:
+                cpu: 20m
+                memory: 64Mi
+- patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: kserve-localmodel-controller-manager
+      namespace: kserve
+    spec:
+      template:
+        spec:
+          containers:
+          - name: manager
+            resources:
+              requests:
+                cpu: 20m
+                memory: 64Mi
+- patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: llmisvc-controller-manager
+      namespace: kserve
+    spec:
+      template:
+        spec:
+          containers:
+          - name: manager
+            resources:
+              requests:
+                cpu: 20m
+                memory: 64Mi

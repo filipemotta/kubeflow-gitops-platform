@@ -1,0 +1,9 @@
+# Stage 10: cert-manager, exactly as in example/kustomization.yaml of
+# kubeflow/manifests 26.10.0. The kubeflow overlay adds the ClusterIssuer the
+# Kubeflow webhooks use; it is accepted only once the cert-manager webhook is
+# up, which is why the lab applies with retries.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../../.cache/manifests/common/cert-manager/base
+- ../../.cache/manifests/common/cert-manager/overlays/kubeflow

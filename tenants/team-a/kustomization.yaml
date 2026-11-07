@@ -1,0 +1,7 @@
+# team-a's own Kubeflow Hub, in team-a's namespace (created by its Profile).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: team-a
+resources:
+- ../hub
+- hub-team-access.yaml

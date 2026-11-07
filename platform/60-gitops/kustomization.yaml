@@ -1,0 +1,14 @@
+# Stage 60: the delivery side, which is not part of Kubeflow.
+# - Argo CD v3.6.1 from the official install manifest, without the components
+#   the lab does not use: Dex (Argo CD's own SSO), the notifications controller
+#   and the ApplicationSet controller. Applications and AppProjects are plain
+#   CRs applied by the platform team.
+# - Gitea (gitea.yaml): the GitOps repository, inside the cluster, so the lab
+#   needs no account on any Git hosting service.
+# - The admission policy that refuses mutable model URIs (policies/).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- argocd/
+- gitea.yaml
+- ../../policies

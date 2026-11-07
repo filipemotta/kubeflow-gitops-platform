@@ -1,0 +1,64 @@
+# Stage 30: login. oauth2-proxy with the "m2m-dex-and-kind" overlay (browser
+# login through Dex, plus Kubernetes ServiceAccount tokens accepted as Bearer
+# tokens at the ingress gateway) and Dex, as in example/kustomization.yaml.
+# Changes:
+# - Dex with two static users instead of user@example.com: alice (team-a) and
+#   bob (team-b). Both passwords are "kubeflow-lab" (bcrypt below); lab only.
+# - one replica of oauth2-proxy and Dex (upstream: two each).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../../.cache/manifests/common/oauth2-proxy/overlays/m2m-dex-and-kind
+- ../../.cache/manifests/common/dex/overlays/oauth2-proxy
+patches:
+- patch: |-
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: dex
+      namespace: auth
+    data:
+      config.yaml: |
+        issuer: http://dex.auth.svc.cluster.local:5556/dex
+        storage:
+          type: kubernetes
+          config:
+            inCluster: true
+        web:
+          http: 0.0.0.0:5556
+        logger:
+          level: "info"
+          format: text
+        oauth2:
+          skipApprovalScreen: true
+        enablePasswordDB: true
+        staticPasswords:
+        - email: alice@example.com
+          hash: "$2y$10$5kWToJ448gSOjUbqJnTpUOcRa5K0GAzXoDdSSkcGqhxBllnvnQ2BG"
+          username: alice
+          userID: "a1a1a1a1-0000-4000-8000-000000000001"
+        - email: bob@example.com
+          hash: "$2y$10$5kWToJ448gSOjUbqJnTpUOcRa5K0GAzXoDdSSkcGqhxBllnvnQ2BG"
+          username: bob
+          userID: "b0b0b0b0-0000-4000-8000-000000000002"
+        staticClients:
+        - idEnv: OIDC_CLIENT_ID
+          redirectURIs: ["/oauth2/callback"]
+          name: 'Dex Login Application'
+          secretEnv: OIDC_CLIENT_SECRET
+- patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: dex
+      namespace: auth
+    spec:
+      replicas: 1
+- patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: oauth2-proxy
+      namespace: oauth2-proxy
+    spec:
+      replicas: 1

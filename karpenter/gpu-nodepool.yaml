@@ -1,0 +1,64 @@
+# GPU capacity for training steps and model servers on EKS with Karpenter
+# v1.15. NOT applied by the lab (no GPU, no AWS): step 11 only validates it
+# against the NodePool and EC2NodeClass CRDs of that release (server-side
+# dry run in the kind cluster).
+#
+# - Only pods that tolerate nvidia.com/gpu land here, so a CPU pod never pins
+#   an expensive node.
+# - consolidateAfter is explicit. Its default is 0s: an empty GPU node is
+#   removed as soon as it is empty, and the next pipeline run pays the full
+#   cold start (instance launch, NVIDIA driver, device plugin, image pull).
+#   10m keeps the node between back-to-back runs; tune it to your run cadence.
+# - limits caps how many GPUs this pool can ever buy.
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: gpu
+spec:
+  template:
+    metadata:
+      labels:
+        workload: gpu
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: gpu
+      requirements:
+      - key: karpenter.k8s.aws/instance-family
+        operator: In
+        values: ["g6", "g5"]
+      - key: karpenter.sh/capacity-type
+        operator: In
+        values: ["on-demand"]
+      taints:
+      - key: nvidia.com/gpu
+        value: "true"
+        effect: NoSchedule
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 10m
+  limits:
+    nvidia.com/gpu: 4
+---
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: gpu
+spec:
+  role: KarpenterNodeRole-my-cluster
+  # Pin the AMI release you tested; "@latest" drifts every node when AWS
+  # publishes a new AMI. (This version is the example from the Karpenter docs.)
+  amiSelectorTerms:
+  - alias: al2023@v20240703
+  subnetSelectorTerms:
+  - tags:
+      karpenter.sh/discovery: my-cluster
+  securityGroupSelectorTerms:
+  - tags:
+      karpenter.sh/discovery: my-cluster
+  blockDeviceMappings:
+  - deviceName: /dev/xvda
+    ebs:
+      volumeSize: 200Gi
+      volumeType: gp3

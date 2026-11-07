@@ -1,0 +1,28 @@
+# A long-running pod in a team namespace, with the Istio sidecar, running as
+# the team's default-editor ServiceAccount (the identity pipeline steps get).
+# The lab execs curl in it to try what a workload of that team could try.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: probe
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: probe
+  template:
+    metadata:
+      labels:
+        app: probe
+    spec:
+      serviceAccountName: default-editor
+      containers:
+      - name: curl
+        image: curlimages/curl:8.17.0
+        command: ["sleep", "infinity"]
+        resources:
+          requests:
+            cpu: 5m
+            memory: 16Mi
+          limits:
+            memory: 64Mi

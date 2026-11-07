@@ -1,0 +1,18 @@
+# Lets team-a's own workloads (pipeline steps run as default-editor) call
+# team-a's Model Registry. Upstream admits only the ingress gateway and the
+# kubeflow namespace, so without this the pipeline cannot register a model.
+# Nothing here admits another team: a pod in team-b is still refused.
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: model-registry-team-access
+spec:
+  action: ALLOW
+  selector:
+    matchLabels:
+      component: model-registry-server
+  rules:
+  - from:
+    - source:
+        namespaces:
+        - team-a

@@ -1,0 +1,32 @@
+# Kubeflow Hub (Model Registry) for one team, from the same upstream pieces as
+# applications/hub/overlays/model-registry in kubeflow/manifests 26.10.0
+# (PostgreSQL backend + Istio options), with three changes:
+# - no UI (model-registry-ui) and no Model Catalog: the lab talks to the REST API;
+# - no VirtualService on the kubeflow-gateway: upstream routes the path
+#   /api/model_registry/ to ONE namespace, so two teams cannot both have it.
+#   Each registry is reached in-cluster, by its own team only;
+# - DestinationRule host made namespace-relative, so the same base works in
+#   any team namespace (the caller sets "namespace:").
+# The team overlay adds the AuthorizationPolicy that lets the team's own
+# workloads (the pipeline) in; upstream only admits the ingress gateway and
+# the kubeflow namespace.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../../.cache/manifests/applications/hub/upstream/overlays/postgres
+- ../../.cache/manifests/applications/hub/upstream/options/istio
+patches:
+- patch: |-
+    apiVersion: networking.istio.io/v1alpha3
+    kind: VirtualService
+    metadata:
+      name: model-registry
+    $patch: delete
+- target:
+    group: networking.istio.io
+    kind: DestinationRule
+    name: model-registry-service
+  patch: |-
+    - op: replace
+      path: /spec/host
+      value: model-registry-service
