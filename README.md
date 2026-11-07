@@ -86,8 +86,10 @@ InferenceServices (`resource.inclusions`), and `GOMEMLIMIT` on the kind API serv
 
 ## Requirements
 
-- Docker (tested: Docker Desktop on an Apple M2 Pro, VM with 5 CPUs and 7.7 GiB), about
-  15 GiB of free disk, internet access to pull images.
+- Docker, with at least 4 CPUs and about 7 GiB for the Docker VM, 15 GiB of free disk and
+  internet access to pull images. Tested on Docker Desktop on an Apple M2 Pro (VM with 5 CPUs
+  and 7.7 GiB) and on GitHub-hosted ubuntu-24.04 runners (4 CPUs, 16 GiB), where
+  `.github/workflows/lab.yml` runs the whole lab on every push to `main` and every Monday.
 - `curl`, `git`, `jq`, `python3` (3.10+). Everything else (kind v0.33.0, kubectl v1.35.10,
   kustomize v5.8.1, crane v0.22.1, the KFP SDK 2.18.0) is downloaded into `bin/` and `.venv/`
   by `tools/install-cli.sh`, checked against the published SHA-256.

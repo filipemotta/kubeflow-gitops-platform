@@ -7,7 +7,9 @@ set -euo pipefail
 # shellcheck source=scripts/lib.sh
 source "$(dirname "$0")/lib.sh"
 
-MIN_CPUS=5
+# Tested on a 5 CPU / 7.7 GiB Docker VM (Apple Silicon) and on GitHub-hosted
+# ubuntu-24.04 runners (4 CPUs, 16 GiB). Below that the install does not settle.
+MIN_CPUS=4
 MIN_MEM_MIB=7000
 MIN_DISK_GIB=15
 
